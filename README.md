@@ -3,7 +3,7 @@ A simple wrapper around the built-in Golang net/http library
 
 ## Import
 ```sh
-go get github.com/JustBugLord/reqtango/v2
+go get github.com/zenviek/reqtango/v2
 ```
 ## License
 
