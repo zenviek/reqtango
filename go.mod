@@ -1,4 +1,4 @@
-module github.com/JustBugLord/reqtango/v2
+module github.com/zenviek/reqtango/v2
 
 go 1.24.1
 
