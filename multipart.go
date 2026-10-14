@@ -55,22 +55,31 @@ func (m *MultipartBuilder) AddField(fieldName, fieldValue string) {
 }
 
 func (m *MultipartBuilder) Build() (*Multipart, error) {
-	if m.records == nil || len(m.records) == 0 {
+	if len(m.records) == 0 {
 		return nil, errors.New("empty records")
 	}
 	data := map[string]io.Reader{}
-	for key, reader := range m.records {
-		if reader.RecordType == File {
-			file, err := os.Open(reader.Value)
+	var openFiles []*os.File
+	for key, rec := range m.records {
+		if rec.RecordType == File {
+			file, err := os.Open(rec.Value)
 			if err != nil {
+				for _, f := range openFiles {
+					f.Close()
+				}
 				return nil, err
 			}
+			openFiles = append(openFiles, file)
 			data[key] = file
-		} else if reader.RecordType == Text {
-			data[key] = strings.NewReader(reader.Value)
+		} else if rec.RecordType == Text {
+			data[key] = strings.NewReader(rec.Value)
 		}
 	}
-	return RawMultipart(data)
+	multi, err := RawMultipart(data)
+	for _, f := range openFiles {
+		f.Close()
+	}
+	return multi, err
 }
 
 func RawMultipart(data map[string]io.Reader) (*Multipart, error) {
@@ -85,7 +94,7 @@ func RawMultipart(data map[string]io.Reader) (*Multipart, error) {
 			}
 			h := make(textproto.MIMEHeader)
 			h.Set("Content-Type", contentType)
-			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, fileName))
+			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, key, fileName))
 			fileWriter, err := bodyWriter.CreatePart(h)
 			if err != nil {
 				return nil, err

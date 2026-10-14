@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/fereidani/httpdecompressor"
 )
@@ -27,12 +29,19 @@ func NewRequestBuilderSimple() *RequestBuilder {
 }
 
 func NewRequestBuilder(defaultHeaders map[string]string) *RequestBuilder {
-	if defaultHeaders == nil {
-		defaultHeaders = make(map[string]string)
+	copied := make(map[string]string)
+	if defaultHeaders != nil {
+		copied = maps.Clone(defaultHeaders)
 	}
 	return &RequestBuilder{
-		defaultHeaders,
-		http.DefaultClient,
+		DefaultHeaders: copied,
+		Client: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 4,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 
@@ -40,11 +49,9 @@ func (b *RequestBuilder) SetHeaders(headers map[string]string) {
 	if headers == nil {
 		return
 	}
-	local := b.DefaultHeaders
 	for k, v := range headers {
-		local[k] = v
+		b.DefaultHeaders[k] = v
 	}
-	b.DefaultHeaders = local
 }
 
 func (b *RequestBuilder) Get(url string, headers ...interface{}) (*Response, error) {
@@ -68,16 +75,17 @@ func (b *RequestBuilder) SendRequest(method Method, url string, body io.Reader, 
 	if err != nil {
 		return nil, err
 	}
-	if to != nil {
-		if err := json.Unmarshal(data, to); err != nil {
-			return nil, errors.New("fail unmarshal response: " + err.Error())
-		}
-	}
-	return &Response{
+	response := &Response{
 		Status:     resp.Status,
 		StatusCode: resp.StatusCode,
 		Body:       data,
-	}, nil
+	}
+	if to != nil {
+		if err := json.Unmarshal(data, to); err != nil {
+			return response, errors.New("fail unmarshal response: " + err.Error())
+		}
+	}
+	return response, nil
 }
 
 func (b *RequestBuilder) SendRequestRaw(method Method, url string, body io.Reader, headers ...interface{}) (*http.Response, []byte, error) {
@@ -133,7 +141,15 @@ func (b *RequestBuilder) appendFields(request *http.Request, headers interface{}
 			}
 		}
 		for i := 0; i < len(fields); i += 2 {
-			request.Header.Set(fields[i].(string), fields[i+1].(string))
+			key, ok := fields[i].(string)
+			if !ok {
+				continue
+			}
+			value, ok := fields[i+1].(string)
+			if !ok {
+				continue
+			}
+			request.Header.Set(key, value)
 		}
 	case map[string]string:
 		keys := make([]string, 0, len(fields))
@@ -141,10 +157,8 @@ func (b *RequestBuilder) appendFields(request *http.Request, headers interface{}
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		kv := make([]interface{}, 2)
 		for _, key := range keys {
-			kv[0], kv[1] = key, fields[key]
-			request.Header.Set(key, kv[0].(string))
+			request.Header.Set(key, fields[key])
 		}
 	}
 }
